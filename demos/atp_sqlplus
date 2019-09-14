@@ -3,6 +3,7 @@
 
 ADMIN_PASSWORD=$(LC_ALL=C tr -cd '[:alnum:]' < /dev/urandom | fold -w9 | head -n1)$(LC_ALL=C tr -cd '[:upper:]' < /dev/urandom | fold -w1 | head -n1)$(LC_ALL=C tr -cd '[:lower:]' < /dev/urandom | fold -w1 | head -n1)$(LC_ALL=C tr -cd '[:digit:]' < /dev/urandom | fold -w1 | head -n1)
 DATABASE_NAME=demo$(LC_ALL=C tr -cd '[:alnum:]' < /dev/urandom | fold -w8 | head -n1 | tr '[:upper:]' '[:lower:]')
+DATABASE_OCID=""
 
 export TNS_ADMIN=$(mktemp -d -t wallet-XXXXXXXXXX)
 
@@ -24,8 +25,12 @@ function cleanup()
   while [[ $result -gt 1 ]] ; do
     read -s -n 1 choice
     case "$choice" in
-      y|Y ) result=0 ;;
-      n|N ) result=1 ;;
+      y|Y ) 
+        printf "$choice \n"
+        result=0 ;;
+      n|N ) 
+        printf "$choice \n"
+        result=1 ;;
     esac
   done
 
@@ -58,12 +63,18 @@ function create_autonomous_database()
         --data-storage-size-in-tbs 1 \
         --admin-password "${ADMIN_PASSWORD}")
     else
-        printf "\n\n"
+        read -p "Enter database id: " existing_database_id
+        read -p "Enter admin password: " db_admin_password
+        ADMIN_PASSWORD=$db_admin_password
+        read -p "Enter database name: " db_name
+        DATABASE_NAME=$db_name
+        DATABASE_OCID=$existing_database_id
+        return 0
     fi
     
     local _status=$?
     if [ $_status == 0 ] ; then
-        echo "${_atp_response}" | jq -r '.data.id'
+        DATABASE_OCID= $("${_atp_response}" | jq -r '.data.id')
     fi
     return $status
 }
@@ -80,7 +91,6 @@ function generate_atp_wallet()
             --password "${ADMIN_PASSWORD}" \
             --file "${_local_wallet}"
     else
-        printf "\n\n"
         return 0
     fi
 
@@ -109,7 +119,7 @@ function generate_atp_wallet()
 function call_sqlplus()
 {
     if @confirm "Connect to ${DATABASE_NAME} with sqlplus?"; then
-        echo "select table_name from all_tables;" | sqlplus admin/"${ADMIN_PASSWORD}"@"${DATABASE_NAME}_high"
+        echo "select USERNAME from all_users;" | sqlplus admin/"${ADMIN_PASSWORD}"@"${DATABASE_NAME}_high"
         return $?
     else
         return 0
@@ -142,20 +152,20 @@ fi
 
 if @confirm 'Create ATP demo\?' ; then
 
-    printf "\n\n"
+    printf "\n"
     validate_compartment "${1}" || { $status=$? ; cleanup ; exit $status ; }
-    printf "\n\n"
-    database_id=$(create_autonomous_database "${1}" || { $status=$? ; cleanup ; exit $status ; })
-    printf "\n\n"
-    generate_atp_wallet "${database_id}" || { $status=$? ; cleanup ; exit $status ; }
-    printf "\n\n"
+    printf "\n"
+    create_autonomous_database "${1}" || { $status=$? ; cleanup ; exit $status ; }
+    printf "\n"
+    generate_atp_wallet "${DATABASE_OCID}" || { $status=$? ; cleanup ; exit $status ; }
+    printf "\n"
     call_sqlplus || { $status=$? ; cleanup ; exit $status ; }
-    printf "\n\n"
-    delete_autonomous_database "${database_id}"
+    printf "\n"
+    delete_autonomous_database "${DATABASE_OCID}"
 
 else
     printf "\n\n"
-    exit 1
+    return 0
 fi
 
-exit $?
+exit 0
